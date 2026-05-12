@@ -310,9 +310,24 @@ static BOOL _dragging = NO;
                                                                        queue:dispatch_get_main_queue()
                                                                   usingBlock:^(CMTime time) {
         [weakSelf updateProgressSlider];
+        // Sync the now-playing screen progress
+        if (weakSelf.playerVC && weakSelf.player) {
+            CMTime dur = weakSelf.player.currentItem.duration;
+            if (!CMTIME_IS_INVALID(dur) && CMTimeGetSeconds(dur) > 0) {
+                NSTimeInterval elapsed  = CMTimeGetSeconds(weakSelf.player.currentTime);
+                NSTimeInterval duration = CMTimeGetSeconds(dur);
+                float fraction = (float)(elapsed / duration);
+                [weakSelf.playerVC updateProgress:fraction
+                                  elapsedSeconds:elapsed
+                                 durationSeconds:duration];
+            }
+        }
     }];
 
-    dispatch_async(dispatch_get_main_queue(), ^{ [self.tableView reloadData]; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.tableView reloadData];
+        [self syncPlayerVCState];
+    });
 }
 
 - (void)playNextTrack {
@@ -354,6 +369,7 @@ static BOOL _dragging = NO;
     } else {
         [self.player play];   [self updatePlayPauseButton:YES];
     }
+    [self syncPlayerVCState];
 }
 
 - (void)nextTapped  { [self playNextTrack]; }
@@ -513,11 +529,62 @@ static BOOL _dragging = NO;
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) {
         [self playTrackAtIndex:indexPath.row];
+        [self openPlayerScreen];
     } else if (indexPath.section == 1) {
         if (indexPath.row == 0) [self shareAll:indexPath];
         if (indexPath.row == 1) [self removeAll];
     }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+
+#pragma mark - Player screen (Now Playing)
+
+- (void)openPlayerScreen {
+    if (!self.playerVC) {
+        self.playerVC = [[YTMDownloadsPlayerViewController alloc] init];
+        self.playerVC.delegate = self;
+    }
+    [self syncPlayerVCState];
+    if (self.playerVC.presentingViewController == nil) {
+        [self presentViewController:self.playerVC animated:YES completion:nil];
+    }
+}
+
+- (void)syncPlayerVCState {
+    if (!self.playerVC) return;
+    NSString *title = self.currentIndex >= 0 && self.currentIndex < (NSInteger)self.audioFiles.count
+        ? [self.audioFiles[self.currentIndex] stringByDeletingPathExtension]
+        : @"-";
+    UIImage *artwork = self.playerArtwork.image;
+    BOOL playing = self.player && self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying;
+    [self.playerVC updateWithTitle:title
+                           artwork:artwork
+                         isPlaying:playing
+                     repeatEnabled:self.isRepeatEnabled
+                    shuffleEnabled:self.isShuffleEnabled];
+}
+
+#pragma mark - YTMDownloadsPlayerDelegate
+
+- (void)playerDidTogglePlayPause { [self playPauseTapped]; }
+- (void)playerDidRequestNext     { [self playNextTrack]; }
+- (void)playerDidRequestPrev     { [self playPreviousTrack]; }
+
+- (void)playerDidRequestSeekTo:(float)fraction {
+    CMTime duration = self.player.currentItem.duration;
+    if (CMTIME_IS_INVALID(duration)) return;
+    CMTime seekTime = CMTimeMakeWithSeconds(fraction * CMTimeGetSeconds(duration), 600);
+    [self.player seekToTime:seekTime];
+}
+
+- (void)playerDidToggleRepeat {
+    [self repeatTapped];
+    [self syncPlayerVCState];
+}
+
+- (void)playerDidToggleShuffle {
+    [self shuffleTapped];
+    [self syncPlayerVCState];
 }
 
 #pragma mark - File actions

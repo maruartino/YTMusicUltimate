@@ -6,8 +6,9 @@
 #import "../Headers/YTAlertView.h"
 #import "../Headers/YTMToastController.h"
 #import "../Headers/Localization.h"
+#import "YTMDownloadsPlayerViewController.h"
 
-@interface YTMDownloads : UIViewController <UITableViewDelegate, UITableViewDataSource>
+@interface YTMDownloads : UIViewController <UITableViewDelegate, UITableViewDataSource, YTMDownloadsPlayerDelegate>
 
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSMutableArray *audioFiles;
@@ -30,5 +31,7 @@
 @property (nonatomic, strong) UIButton *shuffleButton;
 @property (nonatomic, strong) UISlider *progressSlider;
 @property (nonatomic, strong) id timeObserverToken;
+
+@property (nonatomic, strong) YTMDownloadsPlayerViewController *playerVC;
 
 @end
