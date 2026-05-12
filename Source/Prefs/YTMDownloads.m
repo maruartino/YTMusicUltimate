@@ -1,13 +1,12 @@
 #import "YTMDownloads.h"
+#import "YTMTappableSlider.h"
 
 static const CGFloat kPlayerBarHeight = 130.0;
 static const CGFloat kArtworkSize     = 48.0;
 static BOOL _dragging = NO;
 
 // ─── Slider subclass: tap anywhere on the track to seek ─────────────────────
-@interface YTMTappableSlider : UISlider
-@end
-
+// @interface is in YTMTappableSlider.h — only one @implementation across the project.
 @implementation YTMTappableSlider
 - (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     CGPoint pt    = [touch locationInView:self];

@@ -1,22 +1,9 @@
 #import "YTMDownloadsPlayerViewController.h"
+#import "YTMTappableSlider.h"
 
 static const CGFloat kArtworkCornerRadius = 16.0;
 static const CGFloat kArtShadowRadius     = 24.0;
 static const CGFloat kArtShadowOpacity    = 0.55;
-
-// ─── Slider subclass: tap anywhere on the track to seek ─────────────────────
-@interface YTMTappableSlider : UISlider
-@end
-
-@implementation YTMTappableSlider
-- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    CGPoint pt    = [touch locationInView:self];
-    float   ratio = (float)(pt.x / self.bounds.size.width);
-    ratio         = MAX(0.0f, MIN(1.0f, ratio));
-    self.value    = self.minimumValue + ratio * (self.maximumValue - self.minimumValue);
-    return [super beginTrackingWithTouch:touch withEvent:event];
-}
-@end
 
 
 static const CGFloat kArtPlayingScale     = 1.0;
