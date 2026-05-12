@@ -230,6 +230,12 @@ static BOOL _dragging = NO;
         [stack.leadingAnchor  constraintEqualToAnchor:container.leadingAnchor constant:24],
         [stack.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-24],
     ]];
+
+    // Tap anywhere on the bar (except buttons) to reopen the player screen
+    UITapGestureRecognizer *barTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(playerBarTapped)];
+    [self.playerBarView addGestureRecognizer:barTap];
+    // Allow buttons to still receive touches
+    barTap.cancelsTouchesInView = NO;
 }
 
 #pragma mark - Playback
@@ -327,6 +333,7 @@ static BOOL _dragging = NO;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.tableView reloadData];
         [self syncPlayerVCState];
+        [self syncQueueToPlayerVC];
     });
 }
 
@@ -539,12 +546,19 @@ static BOOL _dragging = NO;
 
 #pragma mark - Player screen (Now Playing)
 
+- (void)playerBarTapped {
+    // Reopen player screen even when it was dismissed
+    if (self.currentIndex < 0) return; // nothing playing yet
+    [self openPlayerScreen];
+}
+
 - (void)openPlayerScreen {
     if (!self.playerVC) {
         self.playerVC = [[YTMDownloadsPlayerViewController alloc] init];
         self.playerVC.delegate = self;
     }
     [self syncPlayerVCState];
+    [self syncQueueToPlayerVC];
     if (self.playerVC.presentingViewController == nil) {
         [self presentViewController:self.playerVC animated:YES completion:nil];
     }
@@ -552,7 +566,7 @@ static BOOL _dragging = NO;
 
 - (void)syncPlayerVCState {
     if (!self.playerVC) return;
-    NSString *title = self.currentIndex >= 0 && self.currentIndex < (NSInteger)self.audioFiles.count
+    NSString *title = (self.currentIndex >= 0 && self.currentIndex < (NSInteger)self.audioFiles.count)
         ? [self.audioFiles[self.currentIndex] stringByDeletingPathExtension]
         : @"-";
     UIImage *artwork = self.playerArtwork.image;
@@ -562,6 +576,25 @@ static BOOL _dragging = NO;
                          isPlaying:playing
                      repeatEnabled:self.isRepeatEnabled
                     shuffleEnabled:self.isShuffleEnabled];
+}
+
+- (void)syncQueueToPlayerVC {
+    if (!self.playerVC) return;
+    // Build title + artwork arrays from the full file list
+    NSMutableArray<NSString *> *titles   = [NSMutableArray arrayWithCapacity:self.audioFiles.count];
+    NSMutableArray<UIImage  *> *artworks = [NSMutableArray arrayWithCapacity:self.audioFiles.count];
+    NSString *docsDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+
+    for (NSString *filename in self.audioFiles) {
+        NSString *name = [filename stringByDeletingPathExtension];
+        [titles addObject:name];
+        NSString *imgPath = [[docsDir stringByAppendingPathComponent:@"YTMusicUltimate"]
+                              stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.png", name]];
+        UIImage *art = [UIImage imageWithContentsOfFile:imgPath];
+        [artworks addObject:art ?: [UIImage systemImageNamed:@"music.note"]];
+    }
+
+    [self.playerVC updateQueue:titles artworks:artworks currentIndex:self.currentIndex];
 }
 
 #pragma mark - YTMDownloadsPlayerDelegate
@@ -585,6 +618,10 @@ static BOOL _dragging = NO;
 - (void)playerDidToggleShuffle {
     [self shuffleTapped];
     [self syncPlayerVCState];
+}
+
+- (void)playerDidRequestJumpToIndex:(NSInteger)index {
+    [self playTrackAtIndex:index];
 }
 
 #pragma mark - File actions

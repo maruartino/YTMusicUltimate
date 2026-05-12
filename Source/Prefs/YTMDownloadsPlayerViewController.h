@@ -11,22 +11,32 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)playerDidTogglePlayPause;
 - (void)playerDidToggleRepeat;
 - (void)playerDidToggleShuffle;
+- (void)playerDidRequestJumpToIndex:(NSInteger)index;
 @end
 
 @interface YTMDownloadsPlayerViewController : UIViewController
 
 @property (nonatomic, weak, nullable) id<YTMDownloadsPlayerDelegate> delegate;
 
-// Call these to keep the UI in sync when playback state changes externally
+/// Sync playback state (title, art, playing/repeat/shuffle)
 - (void)updateWithTitle:(NSString *)title
                 artwork:(nullable UIImage *)artwork
               isPlaying:(BOOL)isPlaying
           repeatEnabled:(BOOL)repeatEnabled
          shuffleEnabled:(BOOL)shuffleEnabled;
 
+/// Sync scrubber — call from time observer
 - (void)updateProgress:(float)fraction
        elapsedSeconds:(NSTimeInterval)elapsed
       durationSeconds:(NSTimeInterval)duration;
+
+/// Sync queue list
+- (void)updateQueue:(NSArray<NSString *> *)titles
+           artworks:(NSArray<UIImage *> *)artworks
+       currentIndex:(NSInteger)currentIndex;
+
+/// Dismiss with animation
+- (void)dismissAnimated;
 
 @end
 
