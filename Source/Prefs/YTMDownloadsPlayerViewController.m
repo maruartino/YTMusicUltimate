@@ -3,6 +3,22 @@
 static const CGFloat kArtworkCornerRadius = 16.0;
 static const CGFloat kArtShadowRadius     = 24.0;
 static const CGFloat kArtShadowOpacity    = 0.55;
+
+// ─── Slider subclass: tap anywhere on the track to seek ─────────────────────
+@interface YTMTappableSlider : UISlider
+@end
+
+@implementation YTMTappableSlider
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    CGPoint pt    = [touch locationInView:self];
+    float   ratio = (float)(pt.x / self.bounds.size.width);
+    ratio         = MAX(0.0f, MIN(1.0f, ratio));
+    self.value    = self.minimumValue + ratio * (self.maximumValue - self.minimumValue);
+    return [super beginTrackingWithTouch:touch withEvent:event];
+}
+@end
+
+
 static const CGFloat kArtPlayingScale     = 1.0;
 static const CGFloat kArtPausedScale      = 0.82;
 
@@ -103,7 +119,7 @@ static const CGFloat kArtPausedScale      = 0.82;
 
 // State
 @property (nonatomic, assign) BOOL          isPlaying;
-@property (nonatomic, assign) BOOL          repeatEnabled;
+@property (nonatomic, assign) NSInteger      repeatMode;  // 0=off 1=all 2=one
 @property (nonatomic, assign) BOOL          shuffleEnabled;
 @property (nonatomic, assign) NSTimeInterval duration;
 @property (nonatomic, copy)   NSArray<NSString *> *queueTitles;
@@ -296,7 +312,7 @@ static const CGFloat kArtPausedScale      = 0.82;
 #pragma mark - Progress
 
 - (void)buildProgress {
-    self.progressSlider = [[UISlider alloc] init];
+    self.progressSlider = [[YTMTappableSlider alloc] init];
     self.progressSlider.minimumTrackTintColor = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
     self.progressSlider.maximumTrackTintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.25];
     self.progressSlider.thumbTintColor        = [UIColor whiteColor];
@@ -522,11 +538,11 @@ static const CGFloat kArtPausedScale      = 0.82;
 - (void)updateWithTitle:(NSString *)title
                 artwork:(nullable UIImage *)artwork
               isPlaying:(BOOL)isPlaying
-          repeatEnabled:(BOOL)repeatEnabled
+             repeatMode:(NSInteger)repeatMode
          shuffleEnabled:(BOOL)shuffleEnabled {
 
-    self.isPlaying     = isPlaying;
-    self.repeatEnabled = repeatEnabled;
+    self.isPlaying      = isPlaying;
+    self.repeatMode     = repeatMode;
     self.shuffleEnabled = shuffleEnabled;
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -550,9 +566,14 @@ static const CGFloat kArtPausedScale      = 0.82;
             self.artworkContainer.transform = CGAffineTransformMakeScale(scale, scale);
         } completion:nil];
 
-        // Repeat / shuffle tint
-        UIColor *on = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
-        self.repeatButton.tintColor  = repeatEnabled  ? on : [UIColor whiteColor];
+        // Repeat icon + tint
+        UIColor *on  = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
+        NSString *repeatSF = (repeatMode == 2) ? @"repeat.1" : @"repeat";
+        UIImageSymbolConfiguration *repeatCfg = [UIImageSymbolConfiguration configurationWithPointSize:20];
+        [self.repeatButton setImage:[[UIImage systemImageNamed:repeatSF withConfiguration:repeatCfg]
+                                     imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
+                           forState:UIControlStateNormal];
+        self.repeatButton.tintColor  = (repeatMode == 0) ? [UIColor whiteColor] : on;
         self.shuffleButton.tintColor = shuffleEnabled ? on : [UIColor whiteColor];
 
         [self.queueTable reloadData];

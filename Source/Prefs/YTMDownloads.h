@@ -18,7 +18,7 @@
 @property (nonatomic, strong) AVPlayer *player;
 @property (nonatomic, strong) AVPlayerItem *currentPlayerItem;
 @property (nonatomic, assign) NSInteger currentIndex;
-@property (nonatomic, assign) BOOL isRepeatEnabled;
+@property (nonatomic, assign) NSInteger repeatMode; // 0 = off, 1 = repeat-all, 2 = repeat-one
 @property (nonatomic, assign) BOOL isShuffleEnabled;
 
 @property (nonatomic, strong) UIView *playerBarView;

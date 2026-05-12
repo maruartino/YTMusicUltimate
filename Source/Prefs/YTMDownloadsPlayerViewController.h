@@ -22,7 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)updateWithTitle:(NSString *)title
                 artwork:(nullable UIImage *)artwork
               isPlaying:(BOOL)isPlaying
-          repeatEnabled:(BOOL)repeatEnabled
+             repeatMode:(NSInteger)repeatMode
          shuffleEnabled:(BOOL)shuffleEnabled;
 
 /// Sync scrubber — call from time observer

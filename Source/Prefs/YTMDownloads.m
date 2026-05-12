@@ -4,6 +4,20 @@ static const CGFloat kPlayerBarHeight = 130.0;
 static const CGFloat kArtworkSize     = 48.0;
 static BOOL _dragging = NO;
 
+// ─── Slider subclass: tap anywhere on the track to seek ─────────────────────
+@interface YTMTappableSlider : UISlider
+@end
+
+@implementation YTMTappableSlider
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    CGPoint pt    = [touch locationInView:self];
+    float   ratio = (float)(pt.x / self.bounds.size.width);
+    ratio         = MAX(0.0f, MIN(1.0f, ratio));
+    self.value    = self.minimumValue + ratio * (self.maximumValue - self.minimumValue);
+    return [super beginTrackingWithTouch:touch withEvent:event];
+}
+@end
+
 @implementation YTMDownloads
 
 #pragma mark - Lifecycle
@@ -28,7 +42,7 @@ static BOOL _dragging = NO;
     ]];
 
     self.currentIndex     = -1;
-    self.isRepeatEnabled  = NO;
+    self.repeatMode       = 0;
     self.isShuffleEnabled = NO;
 
     [self maybeShowEmptyState];
@@ -167,7 +181,7 @@ static BOOL _dragging = NO;
     [container addSubview:self.playerTitleLabel];
 
     // Progress slider
-    self.progressSlider = [[UISlider alloc] init];
+    self.progressSlider = [[YTMTappableSlider alloc] init];
     self.progressSlider.minimumTrackTintColor = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
     self.progressSlider.maximumTrackTintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.3];
     self.progressSlider.thumbTintColor        = [UIColor whiteColor];
@@ -293,14 +307,23 @@ static BOOL _dragging = NO;
 
     // Remote commands
     MPRemoteCommandCenter *rcc = [MPRemoteCommandCenter sharedCommandCenter];
-    [rcc.playCommand            removeTarget:nil];
-    [rcc.pauseCommand           removeTarget:nil];
-    [rcc.nextTrackCommand       removeTarget:nil];
-    [rcc.previousTrackCommand   removeTarget:nil];
-    [rcc.playCommand            addTarget:self action:@selector(remotePlay)];
-    [rcc.pauseCommand           addTarget:self action:@selector(remotePause)];
-    [rcc.nextTrackCommand       addTarget:self action:@selector(remoteNext)];
-    [rcc.previousTrackCommand   addTarget:self action:@selector(remotePrev)];
+    [rcc.playCommand                  removeTarget:nil];
+    [rcc.pauseCommand                 removeTarget:nil];
+    [rcc.nextTrackCommand             removeTarget:nil];
+    [rcc.previousTrackCommand         removeTarget:nil];
+    [rcc.changePlaybackPositionCommand removeTarget:nil];
+
+    rcc.playCommand.enabled                   = YES;
+    rcc.pauseCommand.enabled                  = YES;
+    rcc.nextTrackCommand.enabled              = YES;
+    rcc.previousTrackCommand.enabled          = YES;
+    rcc.changePlaybackPositionCommand.enabled = YES;
+
+    [rcc.playCommand                  addTarget:self action:@selector(remotePlay)];
+    [rcc.pauseCommand                 addTarget:self action:@selector(remotePause)];
+    [rcc.nextTrackCommand             addTarget:self action:@selector(remoteNext)];
+    [rcc.previousTrackCommand         addTarget:self action:@selector(remotePrev)];
+    [rcc.changePlaybackPositionCommand addTarget:self action:@selector(remoteSeek:)];
 
     if (!self.player) {
         self.player = [AVPlayer playerWithPlayerItem:item];
@@ -339,14 +362,16 @@ static BOOL _dragging = NO;
 
 - (void)playNextTrack {
     if (self.audioFiles.count == 0) return;
+    // repeat-one: restart current track
+    if (self.repeatMode == 2) { [self playTrackAtIndex:self.currentIndex]; return; }
     NSInteger next;
     if (self.isShuffleEnabled) {
         next = arc4random_uniform((uint32_t)self.audioFiles.count);
     } else {
         next = self.currentIndex + 1;
         if (next >= (NSInteger)self.audioFiles.count) {
-            if (self.isRepeatEnabled) { next = 0; }
-            else { [self.player pause]; [self updatePlayPauseButton:NO]; return; }
+            if (self.repeatMode == 1) { next = 0; }
+            else { [self.player pause]; [self updatePlayPauseButton:NO]; [self syncPlayerVCState]; return; }
         }
     }
     [self playTrackAtIndex:next];
@@ -359,7 +384,7 @@ static BOOL _dragging = NO;
         return;
     }
     NSInteger prev = self.currentIndex - 1;
-    if (prev < 0) prev = self.isRepeatEnabled ? (NSInteger)self.audioFiles.count - 1 : 0;
+    if (prev < 0) prev = (self.repeatMode == 1) ? (NSInteger)self.audioFiles.count - 1 : 0;
     [self playTrackAtIndex:prev];
 }
 
@@ -383,11 +408,16 @@ static BOOL _dragging = NO;
 - (void)prevTapped  { [self playPreviousTrack]; }
 
 - (void)repeatTapped {
-    self.isRepeatEnabled = !self.isRepeatEnabled;
-    UIColor *color = self.isRepeatEnabled
-        ? [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0]
-        : [UIColor whiteColor];
-    self.repeatButton.tintColor = color;
+    self.repeatMode = (self.repeatMode + 1) % 3;
+    UIColor *on  = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
+    UIColor *off = [UIColor whiteColor];
+    NSString *sfName = (self.repeatMode == 2) ? @"repeat.1" : @"repeat";
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16];
+    [self.repeatButton setImage:[[UIImage systemImageNamed:sfName withConfiguration:cfg]
+                                 imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
+                       forState:UIControlStateNormal];
+    self.repeatButton.tintColor = (self.repeatMode == 0) ? off : on;
+    [self syncPlayerVCState];
 }
 
 - (void)shuffleTapped {
@@ -432,10 +462,18 @@ static BOOL _dragging = NO;
 
 #pragma mark - Remote commands
 
-- (MPRemoteCommandHandlerStatus)remotePlay  { [self.player play];  [self updatePlayPauseButton:YES]; return MPRemoteCommandHandlerStatusSuccess; }
-- (MPRemoteCommandHandlerStatus)remotePause { [self.player pause]; [self updatePlayPauseButton:NO];  return MPRemoteCommandHandlerStatusSuccess; }
+- (MPRemoteCommandHandlerStatus)remotePlay  { [self.player play];  [self updatePlayPauseButton:YES]; [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
+- (MPRemoteCommandHandlerStatus)remotePause { [self.player pause]; [self updatePlayPauseButton:NO];  [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
 - (MPRemoteCommandHandlerStatus)remoteNext  { [self playNextTrack];     return MPRemoteCommandHandlerStatusSuccess; }
 - (MPRemoteCommandHandlerStatus)remotePrev  { [self playPreviousTrack]; return MPRemoteCommandHandlerStatusSuccess; }
+
+- (MPRemoteCommandHandlerStatus)remoteSeek:(MPChangePlaybackPositionCommandEvent *)event {
+    CMTime duration = self.player.currentItem.duration;
+    if (CMTIME_IS_INVALID(duration)) return MPRemoteCommandHandlerStatusCommandFailed;
+    CMTime seekTime = CMTimeMakeWithSeconds(event.positionTime, 600);
+    [self.player seekToTime:seekTime toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+    return MPRemoteCommandHandlerStatusSuccess;
+}
 
 #pragma mark - Table view
 
@@ -574,7 +612,7 @@ static BOOL _dragging = NO;
     [self.playerVC updateWithTitle:title
                            artwork:artwork
                          isPlaying:playing
-                     repeatEnabled:self.isRepeatEnabled
+                     repeatMode:self.repeatMode
                     shuffleEnabled:self.isShuffleEnabled];
 }
 
