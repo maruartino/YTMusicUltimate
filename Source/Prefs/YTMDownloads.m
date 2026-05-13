@@ -271,10 +271,27 @@ static BOOL _dragging = NO;
     NSString *docsDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
     NSString *imgPath = [[docsDir stringByAppendingPathComponent:@"YTMusicUltimate"]
                           stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.png", title]];
-    UIImage *artwork  = [UIImage imageWithContentsOfFile:imgPath];
 
+    // Update title immediately; load artwork in background to avoid blocking main thread.
     self.playerTitleLabel.text = title;
-    self.playerArtwork.image   = artwork ?: [UIImage systemImageNamed:@"music.note"];
+    self.playerArtwork.image   = [UIImage systemImageNamed:@"music.note"];
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        UIImage *artwork = [UIImage imageWithContentsOfFile:imgPath];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            weakSelf.playerArtwork.image = artwork ?: [UIImage systemImageNamed:@"music.note"];
+            // Push artwork into now playing info
+            if (artwork) {
+                NSMutableDictionary *info = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
+                MPMediaItemArtwork *mpArt = [[MPMediaItemArtwork alloc] initWithBoundsSize:artwork.size
+                                                                            requestHandler:^UIImage *(CGSize s) { return artwork; }];
+                info[MPMediaItemPropertyArtwork] = mpArt;
+                [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = info;
+            }
+            [weakSelf syncPlayerVCStateWithIsPlaying:YES];
+        });
+    });
 
     AVAudioSession *session = [AVAudioSession sharedInstance];
     [session setCategory:AVAudioSessionCategoryPlayback error:nil];
@@ -287,23 +304,13 @@ static BOOL _dragging = NO;
     titleMeta.keySpace = AVMetadataKeySpaceCommon;
     titleMeta.value    = title;
 
-    AVMutableMetadataItem *artMeta = [AVMutableMetadataItem metadataItem];
-    artMeta.key      = AVMetadataCommonKeyArtwork;
-    artMeta.keySpace = AVMetadataKeySpaceCommon;
-    artMeta.value    = UIImagePNGRepresentation(artwork);
-
-    item.externalMetadata = @[titleMeta, artMeta];
+    item.externalMetadata = @[titleMeta];
 
     // Now Playing (lock screen)
     NSMutableDictionary *nowPlaying = [NSMutableDictionary dictionary];
     nowPlaying[MPMediaItemPropertyTitle]               = title;
     nowPlaying[MPNowPlayingInfoPropertyPlaybackRate]   = @(1.0);
     nowPlaying[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(0.0);
-    if (artwork) {
-        MPMediaItemArtwork *mpArt = [[MPMediaItemArtwork alloc] initWithBoundsSize:artwork.size
-                                                                    requestHandler:^UIImage *(CGSize size) { return artwork; }];
-        nowPlaying[MPMediaItemPropertyArtwork] = mpArt;
-    }
     [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nowPlaying;
 
     // Remote commands — register once per track (removeTarget:nil clears previous handlers)
@@ -359,7 +366,6 @@ static BOOL _dragging = NO;
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.tableView reloadData];
-        [self syncPlayerVCState];
         [self syncQueueToPlayerVC];
     });
 }
@@ -400,12 +406,16 @@ static BOOL _dragging = NO;
 
 - (void)playPauseTapped {
     if (!self.player || self.currentIndex < 0) return;
+    BOOL nowPlaying;
     if (self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying) {
-        [self.player pause];  [self updatePlayPauseButton:NO];
+        [self.player pause];
+        nowPlaying = NO;
     } else {
-        [self.player play];   [self updatePlayPauseButton:YES];
+        [self.player play];
+        nowPlaying = YES;
     }
-    [self syncPlayerVCState];
+    [self updatePlayPauseButton:nowPlaying];
+    [self syncPlayerVCStateWithIsPlaying:nowPlaying];
 }
 
 - (void)nextTapped  { [self playNextTrack]; }
@@ -468,8 +478,8 @@ static BOOL _dragging = NO;
 
 #pragma mark - Remote commands
 
-- (MPRemoteCommandHandlerStatus)remotePlay  { [self.player play];  [self updatePlayPauseButton:YES]; [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
-- (MPRemoteCommandHandlerStatus)remotePause { [self.player pause]; [self updatePlayPauseButton:NO];  [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
+- (MPRemoteCommandHandlerStatus)remotePlay  { [self.player play];  [self updatePlayPauseButton:YES]; [self syncPlayerVCStateWithIsPlaying:YES]; return MPRemoteCommandHandlerStatusSuccess; }
+- (MPRemoteCommandHandlerStatus)remotePause { [self.player pause]; [self updatePlayPauseButton:NO];  [self syncPlayerVCStateWithIsPlaying:NO];  return MPRemoteCommandHandlerStatusSuccess; }
 - (MPRemoteCommandHandlerStatus)remoteTogglePlayPause {
     if (self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying) {
         return [self remotePause];
@@ -617,35 +627,46 @@ static BOOL _dragging = NO;
 
 - (void)syncPlayerVCState {
     if (!self.playerVC) return;
+    BOOL playing = self.player && self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying;
+    [self syncPlayerVCStateWithIsPlaying:playing];
+}
+
+- (void)syncPlayerVCStateWithIsPlaying:(BOOL)playing {
+    if (!self.playerVC) return;
     NSString *title = (self.currentIndex >= 0 && self.currentIndex < (NSInteger)self.audioFiles.count)
         ? [self.audioFiles[self.currentIndex] stringByDeletingPathExtension]
         : @"-";
     UIImage *artwork = self.playerArtwork.image;
-    BOOL playing = self.player && self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying;
     [self.playerVC updateWithTitle:title
                            artwork:artwork
                          isPlaying:playing
-                     repeatMode:self.repeatMode
+                        repeatMode:self.repeatMode
                     shuffleEnabled:self.isShuffleEnabled];
 }
 
 - (void)syncQueueToPlayerVC {
     if (!self.playerVC) return;
-    // Build title + artwork arrays from the full file list
-    NSMutableArray<NSString *> *titles   = [NSMutableArray arrayWithCapacity:self.audioFiles.count];
-    NSMutableArray<UIImage  *> *artworks = [NSMutableArray arrayWithCapacity:self.audioFiles.count];
+    NSArray<NSString *> *snapshot = [self.audioFiles copy];
+    NSInteger currentIdx = self.currentIndex;
     NSString *docsDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
 
-    for (NSString *filename in self.audioFiles) {
-        NSString *name = [filename stringByDeletingPathExtension];
-        [titles addObject:name];
-        NSString *imgPath = [[docsDir stringByAppendingPathComponent:@"YTMusicUltimate"]
-                              stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.png", name]];
-        UIImage *art = [UIImage imageWithContentsOfFile:imgPath];
-        [artworks addObject:art ?: [UIImage systemImageNamed:@"music.note"]];
-    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSMutableArray<NSString *> *titles   = [NSMutableArray arrayWithCapacity:snapshot.count];
+        NSMutableArray<UIImage  *> *artworks = [NSMutableArray arrayWithCapacity:snapshot.count];
 
-    [self.playerVC updateQueue:titles artworks:artworks currentIndex:self.currentIndex];
+        for (NSString *filename in snapshot) {
+            NSString *name = [filename stringByDeletingPathExtension];
+            [titles addObject:name];
+            NSString *imgPath = [[docsDir stringByAppendingPathComponent:@"YTMusicUltimate"]
+                                  stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.png", name]];
+            UIImage *art = [UIImage imageWithContentsOfFile:imgPath];
+            [artworks addObject:art ?: [UIImage systemImageNamed:@"music.note"]];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.playerVC updateQueue:titles artworks:artworks currentIndex:currentIdx];
+        });
+    });
 }
 
 #pragma mark - YTMDownloadsPlayerDelegate

@@ -528,56 +528,57 @@ static const CGFloat kArtPausedScale      = 0.82;
              repeatMode:(NSInteger)repeatMode
          shuffleEnabled:(BOOL)shuffleEnabled {
 
+    // This method is always called from the main thread — no dispatch needed.
     self.isPlaying      = isPlaying;
     self.repeatMode     = repeatMode;
     self.shuffleEnabled = shuffleEnabled;
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.titleLabel.text = title;
+    self.titleLabel.text = title;
 
-        UIImage *art = artwork ?: [UIImage systemImageNamed:@"music.note"];
-        self.artworkImageView.image = art;
-        self.bgBlurImageView.image  = art;
+    UIImage *art = artwork ?: [UIImage systemImageNamed:@"music.note"];
+    self.artworkImageView.image = art;
+    self.bgBlurImageView.image  = art;
 
-        // Play/pause icon – must force a fresh image to guarantee the button redraws
+    // Play/pause button — use a tag to avoid redundant updates that confuse UIButton
+    NSInteger ppTag = isPlaying ? 1 : 0;
+    if (self.playPauseButton.tag != ppTag) {
+        self.playPauseButton.tag = ppTag;
         UIImageSymbolConfiguration *ppCfg = [UIImageSymbolConfiguration configurationWithPointSize:36 weight:UIImageSymbolWeightRegular];
         NSString *ppName = isPlaying ? @"pause.fill" : @"play.fill";
-        [self.playPauseButton setImage:nil forState:UIControlStateNormal];   // clear first
         [self.playPauseButton setImage:[[UIImage systemImageNamed:ppName withConfiguration:ppCfg]
                                         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
                               forState:UIControlStateNormal];
+    }
 
-        // Artwork scale
-        CGFloat scale = isPlaying ? kArtPlayingScale : kArtPausedScale;
-        [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.3 options:0 animations:^{
-            self.artworkContainer.transform = CGAffineTransformMakeScale(scale, scale);
-        } completion:nil];
+    // Artwork scale
+    CGFloat scale = isPlaying ? kArtPlayingScale : kArtPausedScale;
+    [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.3 options:0 animations:^{
+        self.artworkContainer.transform = CGAffineTransformMakeScale(scale, scale);
+    } completion:nil];
 
-        // Repeat icon + tint
-        UIColor *on  = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
-        NSString *repeatSF = (repeatMode == 2) ? @"repeat.1" : @"repeat";
-        UIImageSymbolConfiguration *repeatCfg = [UIImageSymbolConfiguration configurationWithPointSize:20];
-        [self.repeatButton setImage:[[UIImage systemImageNamed:repeatSF withConfiguration:repeatCfg]
-                                     imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
-                           forState:UIControlStateNormal];
-        self.repeatButton.tintColor  = (repeatMode == 0) ? [UIColor whiteColor] : on;
-        self.shuffleButton.tintColor = shuffleEnabled ? on : [UIColor whiteColor];
+    // Repeat icon + tint
+    UIColor *on  = [UIColor colorWithRed:30/255.0 green:150/255.0 blue:245/255.0 alpha:1.0];
+    NSString *repeatSF = (repeatMode == 2) ? @"repeat.1" : @"repeat";
+    UIImageSymbolConfiguration *repeatCfg = [UIImageSymbolConfiguration configurationWithPointSize:20];
+    [self.repeatButton setImage:[[UIImage systemImageNamed:repeatSF withConfiguration:repeatCfg]
+                                 imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
+                       forState:UIControlStateNormal];
+    self.repeatButton.tintColor  = (repeatMode == 0) ? [UIColor whiteColor] : on;
+    self.shuffleButton.tintColor = shuffleEnabled ? on : [UIColor whiteColor];
 
-        [self.queueTable reloadData];
-    });
+    [self.queueTable reloadData];
 }
 
 - (void)updateProgress:(float)fraction
        elapsedSeconds:(NSTimeInterval)elapsed
       durationSeconds:(NSTimeInterval)duration {
     if (self.isScrubbing) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.duration = duration;
-        self.progressSlider.value = fraction;
-        self.elapsedLabel.text    = [self formatTime:elapsed];
-        NSTimeInterval rem = MAX(0, duration - elapsed);
-        self.remainingLabel.text  = [NSString stringWithFormat:@"-%@", [self formatTime:rem]];
-    });
+    // Called from the periodic time observer which already runs on the main queue.
+    self.duration = duration;
+    self.progressSlider.value = fraction;
+    self.elapsedLabel.text    = [self formatTime:elapsed];
+    NSTimeInterval rem = MAX(0, duration - elapsed);
+    self.remainingLabel.text  = [NSString stringWithFormat:@"-%@", [self formatTime:rem]];
 }
 
 - (void)updateQueue:(NSArray<NSString *> *)titles
