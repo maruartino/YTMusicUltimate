@@ -345,19 +345,19 @@ static BOOL _dragging = NO;
     [self.player play];
     [self updatePlayPauseButton:YES];
 
-    __weak typeof(self) weakSelf = self;
+    __weak typeof(self) weakSelf2 = self;
     self.timeObserverToken = [self.player addPeriodicTimeObserverForInterval:CMTimeMake(1, 4)
                                                                        queue:dispatch_get_main_queue()
                                                                   usingBlock:^(CMTime time) {
-        [weakSelf updateProgressSlider];
+        [weakSelf2 updateProgressSlider];
         // Sync the now-playing screen progress
-        if (weakSelf.playerVC && weakSelf.player) {
-            CMTime dur = weakSelf.player.currentItem.duration;
+        if (weakSelf2.playerVC && weakSelf2.player) {
+            CMTime dur = weakSelf2.player.currentItem.duration;
             if (!CMTIME_IS_INVALID(dur) && CMTimeGetSeconds(dur) > 0) {
-                NSTimeInterval elapsed  = CMTimeGetSeconds(weakSelf.player.currentTime);
+                NSTimeInterval elapsed  = CMTimeGetSeconds(weakSelf2.player.currentTime);
                 NSTimeInterval duration = CMTimeGetSeconds(dur);
                 float fraction = (float)(elapsed / duration);
-                [weakSelf.playerVC updateProgress:fraction
+                [weakSelf2.playerVC updateProgress:fraction
                                   elapsedSeconds:elapsed
                                  durationSeconds:duration];
             }
