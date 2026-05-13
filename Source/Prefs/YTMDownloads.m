@@ -296,7 +296,9 @@ static BOOL _dragging = NO;
 
     // Now Playing (lock screen)
     NSMutableDictionary *nowPlaying = [NSMutableDictionary dictionary];
-    nowPlaying[MPMediaItemPropertyTitle] = title;
+    nowPlaying[MPMediaItemPropertyTitle]               = title;
+    nowPlaying[MPNowPlayingInfoPropertyPlaybackRate]   = @(1.0);
+    nowPlaying[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(0.0);
     if (artwork) {
         MPMediaItemArtwork *mpArt = [[MPMediaItemArtwork alloc] initWithBoundsSize:artwork.size
                                                                     requestHandler:^UIImage *(CGSize size) { return artwork; }];
@@ -304,24 +306,27 @@ static BOOL _dragging = NO;
     }
     [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nowPlaying;
 
-    // Remote commands
+    // Remote commands — register once per track (removeTarget:nil clears previous handlers)
     MPRemoteCommandCenter *rcc = [MPRemoteCommandCenter sharedCommandCenter];
-    [rcc.playCommand                  removeTarget:nil];
-    [rcc.pauseCommand                 removeTarget:nil];
-    [rcc.nextTrackCommand             removeTarget:nil];
-    [rcc.previousTrackCommand         removeTarget:nil];
+    [rcc.playCommand                   removeTarget:nil];
+    [rcc.pauseCommand                  removeTarget:nil];
+    [rcc.togglePlayPauseCommand        removeTarget:nil];
+    [rcc.nextTrackCommand              removeTarget:nil];
+    [rcc.previousTrackCommand          removeTarget:nil];
     [rcc.changePlaybackPositionCommand removeTarget:nil];
 
-    rcc.playCommand.enabled                   = YES;
-    rcc.pauseCommand.enabled                  = YES;
-    rcc.nextTrackCommand.enabled              = YES;
-    rcc.previousTrackCommand.enabled          = YES;
-    rcc.changePlaybackPositionCommand.enabled = YES;
+    rcc.playCommand.enabled                    = YES;
+    rcc.pauseCommand.enabled                   = YES;
+    rcc.togglePlayPauseCommand.enabled         = YES;
+    rcc.nextTrackCommand.enabled               = YES;
+    rcc.previousTrackCommand.enabled           = YES;
+    rcc.changePlaybackPositionCommand.enabled  = YES;
 
-    [rcc.playCommand                  addTarget:self action:@selector(remotePlay)];
-    [rcc.pauseCommand                 addTarget:self action:@selector(remotePause)];
-    [rcc.nextTrackCommand             addTarget:self action:@selector(remoteNext)];
-    [rcc.previousTrackCommand         addTarget:self action:@selector(remotePrev)];
+    [rcc.playCommand                   addTarget:self action:@selector(remotePlay)];
+    [rcc.pauseCommand                  addTarget:self action:@selector(remotePause)];
+    [rcc.togglePlayPauseCommand        addTarget:self action:@selector(remoteTogglePlayPause)];
+    [rcc.nextTrackCommand              addTarget:self action:@selector(remoteNext)];
+    [rcc.previousTrackCommand          addTarget:self action:@selector(remotePrev)];
     [rcc.changePlaybackPositionCommand addTarget:self action:@selector(remoteSeek:)];
 
     if (!self.player) {
@@ -453,9 +458,11 @@ static BOOL _dragging = NO;
     if (CMTIME_IS_INVALID(duration) || CMTimeGetSeconds(duration) == 0) return;
     self.progressSlider.value = (float)(CMTimeGetSeconds(current) / CMTimeGetSeconds(duration));
 
+    BOOL isPlaying = (self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying);
     NSMutableDictionary *info = [[MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo mutableCopy] ?: [NSMutableDictionary dictionary];
     info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(CMTimeGetSeconds(current));
     info[MPMediaItemPropertyPlaybackDuration]         = @(CMTimeGetSeconds(duration));
+    info[MPNowPlayingInfoPropertyPlaybackRate]        = @(isPlaying ? 1.0 : 0.0);
     [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = info;
 }
 
@@ -463,6 +470,13 @@ static BOOL _dragging = NO;
 
 - (MPRemoteCommandHandlerStatus)remotePlay  { [self.player play];  [self updatePlayPauseButton:YES]; [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
 - (MPRemoteCommandHandlerStatus)remotePause { [self.player pause]; [self updatePlayPauseButton:NO];  [self syncPlayerVCState]; return MPRemoteCommandHandlerStatusSuccess; }
+- (MPRemoteCommandHandlerStatus)remoteTogglePlayPause {
+    if (self.player.timeControlStatus == AVPlayerTimeControlStatusPlaying) {
+        return [self remotePause];
+    } else {
+        return [self remotePlay];
+    }
+}
 - (MPRemoteCommandHandlerStatus)remoteNext  { [self playNextTrack];     return MPRemoteCommandHandlerStatusSuccess; }
 - (MPRemoteCommandHandlerStatus)remotePrev  { [self playPreviousTrack]; return MPRemoteCommandHandlerStatusSuccess; }
 
